@@ -29,7 +29,7 @@ extern "C" {
 #define INLINE __inline
 #endif
 
-// --- Shader Source (Updated to support solid color) ---
+// --- Shader Source ---
 const char* vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
     "layout (location = 1) in vec2 aTexCoords;\n"
@@ -39,16 +39,16 @@ const char* vertexShaderSource = "#version 330 core\n"
     "   TexCoords = aTexCoords;\n"
     "}\n";
 
-// Added 'vec3 objectColor' to handle the white fallback state
 const char* fragmentShaderSource = "#version 330 core\n"
     "in vec2 TexCoords;\n"
     "uniform sampler2D videoFrame;\n"
-    "uniform bool useTexture;\n" // New uniform: if true, sample texture, else use color
-    "uniform vec3 objectColor;\n" // New uniform: fallback color (white)
+    "uniform bool useTexture;\n"
+    "uniform vec3 objectColor;\n"
     "out vec4 FragColor;\n"
     "void main() {\n"
     "   if (useTexture) {\n"
-    "       FragColor = texture(videoFrame, TexCoords);\n"
+    "       vec4 texColor = texture(videoFrame, TexCoords);\n"
+    "       FragColor = vec4(texColor.rgb, 1.0);\n"
     "   } else {\n"
     "       FragColor = vec4(objectColor, 1.0);\n"
     "   }\n"
@@ -278,14 +278,14 @@ struct AppState {
         float hw = quadWidth * 0.5f;
         float hh = quadHeight * 0.5f;
         
-        // Two triangles covering the full quad, explicit layout
+        // Two triangles covering the full quad
         float quadVertices[] = {
             -hw,  hh, 0.0f,   0.0f, 0.0f,  // top-left
              hw,  hh, 0.0f,   1.0f, 0.0f,  // top-right
             -hw, -hh, 0.0f,   0.0f, 1.0f,  // bottom-left
+             hw,  hh, 0.0f,   1.0f, 0.0f,  // top-right (dup)
              hw, -hh, 0.0f,   1.0f, 1.0f,  // bottom-right
-            -hw,  hh, 0.0f,   0.0f, 0.0f,  // top-left (dup)
-             hw, -hh, 0.0f,   1.0f, 1.0f,  // bottom-right (dup)
+            -hw, -hh, 0.0f,   0.0f, 1.0f,  // bottom-left (dup)
         };
         
         glGenVertexArrays(1, &quadVAO);
@@ -343,24 +343,8 @@ struct AppState {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
                 
-                // Test A: upload as GL_RGB raw pixels (3 bytes/pixel) - same as image path
+                // Upload as GL_RGB raw pixels (3 bytes/pixel)
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, player.width, player.height, 0, GL_RGB, GL_UNSIGNED_BYTE, player.pixels);
-                glFinish();
-                std::vector<GLubyte> testRgb(3);
-                glReadPixels(player.width/2, player.height/2, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, testRgb.data());
-                std::cout << "[LOAD] TEST-A (GL_RGB raw): center=" << (int)testRgb[0] << "," << (int)testRgb[1] << "," << (int)testRgb[2] << std::endl;
-                
-                // Test B: upload as GL_RGBA rgbaPixels (4 bytes/pixel)
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, player.width, player.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, player.rgbaPixels);
-                glFinish();
-                std::vector<GLubyte> testRgba(4);
-                glReadPixels(player.width/2, player.height/2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, testRgba.data());
-                std::cout << "[LOAD] TEST-B (GL_RGBA conv): center=" << (int)testRgba[0] << "," << (int)testRgba[1] << "," << (int)testRgba[2] << std::endl;
-                
-                // Also print raw pixel values at known offset
-                int centerOffset = (player.height/2) * player.width * 3 + (player.width/2) * 3;
-                std::cout << "[LOAD] pixels[" << centerOffset << "] = " << (int)player.pixels[centerOffset] << ","
-                          << (int)player.pixels[centerOffset+1] << "," << (int)player.pixels[centerOffset+2] << std::endl;
                 
                 float aspect = (float)player.width / player.height;
                 setupQuadForAspect(aspect);
@@ -445,17 +429,13 @@ int main() {
             state.player.updateFrame();
         }
 
+        static int frameCount = 0;
+        frameCount++;
+
         if (state.videoTextureID) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, state.videoTextureID);
             
-            GLint boundTex = 0;
-            glGetIntegerv(GL_TEXTURE_BINDING_2D, &boundTex);
-            static int debugCounter2 = 0;
-            debugCounter2++;
-            if (debugCounter2 % 300 == 0) {
-                std::cout << "[RENDER] boundTex=" << boundTex << " videoTextureID=" << state.videoTextureID << std::endl;
-            }
         } else {
             if (state.currentMode != AppState::Mode::WHITE) {
                 std::cout << "[RENDER] NO TEXTURE bound (mode=" << (int)state.currentMode << ")" << std::endl;
@@ -464,13 +444,22 @@ int main() {
 
         glBindVertexArray(state.quadVAO);
         glDrawArrays(GL_TRIANGLES, 0, 6);
-        
-        // Debug info
-        static int frameCount = 0;
-        static int debugCounter = 0;
-        frameCount++;
-        debugCounter++;
-        if (debugCounter % 300 == 0 && state.currentMode == AppState::Mode::VIDEO) {
+
+
+        // Debug: print pixel color at screen center
+        {
+            std::vector<GLubyte> screenPixel(3);
+            glReadPixels(640, 360, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, screenPixel.data());
+            if (frameCount == 1 || frameCount % 60 == 0) {
+                std::cout << "[SCREEN-CENTER] Frame=" << frameCount << " pixel=["
+                          << (int)screenPixel[0] << "," << (int)screenPixel[1] << "," << (int)screenPixel[2] << "]"
+                          << " mode=" << (state.currentMode == AppState::Mode::WHITE ? "WHITE" :
+                             state.currentMode == AppState::Mode::VIDEO ? "VIDEO" : "IMAGE")
+                          << " texID=" << state.videoTextureID << std::endl;
+            }
+        }
+        if (frameCount % 300 == 0 && state.currentMode == AppState::Mode::VIDEO) {       
+ 
             // Check if texture has non-zero data by reading back a pixel
             GLint texW = 0, texH = 0;
             glBindTexture(GL_TEXTURE_2D, state.videoTextureID);
