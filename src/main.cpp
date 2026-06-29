@@ -388,6 +388,7 @@ struct AppState {
 };
 
 int main() {
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
     if (!glfwInit()) return -1;
     
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);

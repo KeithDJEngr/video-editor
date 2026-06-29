@@ -43,7 +43,4 @@ head -n 3 third_party/imgui/ImGuiFileDialog.h
 
 
 # Build
-rm -rf build/ && mkdir -p build && cd build
-cmake ..
-make -j4
-./VideoEditor
+rm -rf build/ && mkdir -p build && cd build && cmake .. && make -j4 && cd .. && ./build/VideoEditor
